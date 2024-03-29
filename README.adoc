@@ -1,0 +1,27 @@
+acid
+====
+
+'acid' is A Continuous Integration Daemon.
+
+The aim of this project is to provide a trivial CI daemon for Gitea.
+I find most alternatives way too complex to set up and run in a local setting,
+while the gist of it is actually very simple--run some stuff on new git commits.
+
+'acid' provides a simple web frontend, as well as a webhook endpoint
+for notifications about new commits.  The daemon is supposed to be "firewalled"
+by a normal HTTP server, and it will not provide TLS support to secure
+communications.
+
+'acid' runs tasks over SSH, which should be universal enough.
+It can tell you the build results via any method you can put in a shell script.
+
+Getting it to work
+------------------
+ # apt install git golang asciidoctor
+ $ git clone https://git.janouch.name/p/acid.git
+ $ cd acid
+ $ make
+ $ man -l acid.1
+
+You will need to write your own runner scripts, which may be nontrivial.
+The author suggests using __cloud-init__-enabled virtual machines with QEMU.

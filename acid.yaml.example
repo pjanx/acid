@@ -1,0 +1,64 @@
+---
+# Path to an SQLite database file, which will be automatically created.
+db: acid.db
+# Address to listen on.
+listen: :http
+# Externally visible base URL that Gitea, its users, and RPC can connect to.
+# The root/push endpoint accepts Gitea push notifications.
+root: http://acid
+
+# Arbitrary secret that Gitea and RPC will sign their requests with.
+secret: 0123456789abcde
+# Base URL of the Gitea instance.
+gitea: http://gitea
+# Gitea access token used for writing commit statuses back to repositories.
+token: 0123456789abcdefghijklmnopqrstuvwxyzABCD
+
+# Arbitrary sh script to notify about the results of finished tasks.
+notify: |
+  xN irc://acid@/acid?skipjoin&usenotice <<END
+  {{.FullName}} {{.Hash}}: {{.RunnerName}} {{.State}} {{.URL}}
+  END
+
+# List of all available runners for projects, keyed by an ID (.Runner).
+runners:
+  arch:
+    # Descriptive name of the runner (.RunnerName).
+    name: Arch Linux
+
+    # Executable to make the runner present.
+    # It may spawn a container, run a virtual machine, or even just sleep.
+    # If it exits prematurely, the task fails.
+    run: runners/arch.sh
+
+    # SSH configuration for connecting to the runner.
+    ssh:
+      # Username to connect as.
+      user: ci
+      # Adress of the SSH server.
+      address: arch:22
+      # Path to an SSH private key file, which may be used for public key auth.
+      identity: data/id_rsa
+
+    # Arbitrary shell script to prepare the stage for project scripts.
+    setup: |
+      set -ex
+      sudo pacman -Syu --noconfirm git
+      git clone --recursive '{{.CloneURL}}' '{{.Repo}}'
+      cd '{{.Repo}}'
+      git -c advice.detachedHead=false checkout '{{.Hash}}'
+
+# Configuration for individual Gitea repositories.
+projects:
+  # Full repository name (.FullName, .Owner/.Repo).
+  owner/repo:
+    runners:
+      arch:
+        # Project setup script, meant to install dependencies.
+        setup: |
+          sudo pacman -S --noconfirm findutils coreutils
+
+        # Project build script.
+        build: |
+          echo Computing line count...
+          find . -not -path '*/.*' -type f -print0 | xargs -0 cat | wc -l

@@ -1,0 +1,80 @@
+acid(1)
+=======
+:doctype: manpage
+:manmanual: acid Manual
+:mansource: acid {release-version}
+
+Name
+----
+acid - A Continuous Integration Daemon
+
+Synopsis
+--------
+*acid* [_OPTION_]... acid.yaml [_COMMAND_...]
+
+Description
+-----------
+*acid* run without command arguments will start an HTTP server that creates
+and executes tasks upon receiving push notifications from a Gitea instance,
+according to the passed configuration file.
+
+When a command is passed, *acid* will relay it to that running instance
+as an RPC call.
+
+Options
+-------
+*-version*::
+	Output version information and exit.
+
+Commands
+--------
+*restart* _ID_...::
+	Schedule tasks with the given IDs to be rerun.
+
+Configuration
+-------------
+For help with creating the configuration file, consult the _acid.yaml.example_
+file present in the distribution.
+
+All paths are currently relative to the directory you launch *acid* from.
+
+The *notify*, *setup*, and *build* scripts are processed using Go's
+_text/template_ package, and take an object describing the task,
+which has the following fields:
+
+*ID*::
+	Unique integer ID for each task.
+
+*Owner*::
+	Gitea user owning the repository.
+*Repo*::
+	Name of the repository.
+*FullName*::
+	Full name of the repository, including the owner.
+*Hash*::
+	Commit hash pertaining to the task.
+*Runner*::
+	Runner ID.
+*RunnerName*::
+	Descriptive name of the runner.
+
+*URL*::
+	*acid* link to the task, where its log output can be seen.
+*RepoURL*::
+	Gitea link to the repository.
+*CommitURL*::
+	Gitea link to the commit.
+*CloneURL*::
+	Gitea link for cloning the repository over HTTP.
+
+Runners
+-------
+Runners receive the following additional environment variables:
+
+*ACID_ROOT*::   The same as the base directory for configuration.
+*ACID_RUNNER*:: The same as *Runner* in script templates.
+
+Reporting bugs
+--------------
+Use https://git.janouch.name/p/acid to report bugs, request features,
+or submit pull requests.
