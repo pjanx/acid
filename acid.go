@@ -787,6 +787,22 @@ func executorRunTask(ctx context.Context, task Task) error {
 		"ACID_RUNNER="+rt.DB.Runner,
 	)
 
+	// Pushing the runner into a new process group that can be killed at once
+	// with all its children isn't bullet-proof, it messes with job control
+	// when acid is run from an interactive shell, and it also seems avoidable
+	// (use "exec" in runner scripts, so that VMs take over the process).
+	// Maybe this is something that could be opt-in.
+	/*
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			if err == syscall.ESRCH {
+				return os.ErrProcessDone
+			}
+			return err
+		}
+	*/
+
 	log.Printf("task %d for %s: starting %s\n",
 		rt.DB.ID, rt.DB.FullName(), rt.Runner.Name)
 
@@ -812,10 +828,9 @@ func executorRunTask(ctx context.Context, task Task) error {
 		case <-ctxRunner.Done():
 			// This doesn't leave the runner almost any time on our shutdown,
 			// but whatever--they're supposed to be ephemeral.
-			// Moreover, we don't even override cmd.CancelFunc.
 		case <-time.After(5 * time.Second):
 		}
-		_ = cmd.Process.Kill()
+		_ = cmd.Cancel()
 	}()
 
 	client, err := executorConnect(ctxRunner, &ssh.ClientConfig{
