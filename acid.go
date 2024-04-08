@@ -183,7 +183,7 @@ var templateTask = template.Must(template.New("tasks").Parse(`
 {{end}}
 </head>
 <body>
-<h1><a href="/">Tasks</a> &raquo; {{.ID}}</h1>
+<h1><a href="..">Tasks</a> &raquo; {{.ID}}</h1>
 <dl>
 <dt>Project</dt>
 	<dd><a href="{{.RepoURL}}">{{.FullName}}</a></dd>
