@@ -374,7 +374,8 @@ func rpcRestart(w io.Writer, ids []int64) {
 		// The executor bumps to "running" after inserting into gRunning,
 		// so we should not need to exclude that state here.
 		result, err := gDB.ExecContext(context.Background(),
-			`UPDATE task SET state = ? WHERE id = ?`, taskStateNew, id)
+			`UPDATE task SET state = ?, detail = '' WHERE id = ?`,
+			taskStateNew, id)
 		if err != nil {
 			fmt.Fprintf(w, "%d: %s\n", id, err)
 		} else if n, _ := result.RowsAffected(); n != 1 {
