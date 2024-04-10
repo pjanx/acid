@@ -373,8 +373,8 @@ func rpcRestart(w io.Writer, ids []int64) {
 
 		// The executor bumps to "running" after inserting into gRunning,
 		// so we should not need to exclude that state here.
-		result, err := gDB.ExecContext(context.Background(),
-			`UPDATE task SET state = ?, detail = '' WHERE id = ?`,
+		result, err := gDB.ExecContext(context.Background(), `UPDATE task
+			SET state = ?, detail = '', notified = 0 WHERE id = ?`,
 			taskStateNew, id)
 		if err != nil {
 			fmt.Fprintf(w, "%d: %s\n", id, err)
@@ -382,6 +382,7 @@ func rpcRestart(w io.Writer, ids []int64) {
 			fmt.Fprintf(w, "%d: no such task\n", id)
 		}
 	}
+	notifierAwaken()
 	executorAwaken()
 }
 
