@@ -25,3 +25,7 @@ Getting it to work
 
 You will need to write your own runner scripts, which may be nontrivial.
 The author suggests using __cloud-init__-enabled virtual machines with QEMU.
+
+Demo
+----
+'acid' is deployed on https://git.janouch.name[].
