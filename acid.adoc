@@ -28,8 +28,12 @@ Options
 
 Commands
 --------
-*restart* _ID_...::
+*enqueue* _OWNER_ _REPO_ _REF_ [_RUNNER_]...::
+	Create new or restart existing tasks for the given reference,
+	which will be resolved to a full commit hash.
+*restart* [_ID_]...::
 	Schedule tasks with the given IDs to be rerun.
+	Run this command without arguments to pick up external database changes.
 
 Configuration
 -------------
