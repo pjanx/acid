@@ -102,7 +102,7 @@ var shellFuncs = ttemplate.FuncMap{
 	"quote": func(word string) string {
 		// History expansion is annoying, don't let it cut us.
 		if strings.IndexRune(word, '!') >= 0 {
-			return "'" + strings.ReplaceAll(word, "'", `'"'"'`) + "'"
+			return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
 		}
 
 		const special = "$`\"\\"

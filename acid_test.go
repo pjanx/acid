@@ -12,7 +12,7 @@ func TestTemplateQuote(t *testing.T) {
 	for _, test := range []struct {
 		input, output string
 	}{
-		{`!!`, `'!!'`},
+		{`!!'!$`, `'!!'\''!$'`},
 		{``, `""`},
 		{`${var}`, `"\${var}"`},
 		{"`cat`", "\"\\`cat\\`\""},
