@@ -71,6 +71,9 @@ which has the following fields:
 *CloneURL*::
 	Gitea link for cloning the repository over HTTP.
 
+The special *quote* template function quotes fields for safe usage
+in *sh*(1) command arguments.
+
 Runners
 -------
 Runners receive the following additional environment variables:

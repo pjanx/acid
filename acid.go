@@ -93,8 +93,28 @@ func parseConfig(path string) error {
 	}
 
 	var err error
-	gNotifyScript, err = ttemplate.New("notify").Parse(gConfig.Notify)
+	gNotifyScript, err =
+		ttemplate.New("notify").Funcs(shellFuncs).Parse(gConfig.Notify)
 	return err
+}
+
+var shellFuncs = ttemplate.FuncMap{
+	"quote": func(word string) string {
+		// History expansion is annoying, don't let it cut us.
+		if strings.IndexRune(word, '!') >= 0 {
+			return "'" + strings.ReplaceAll(word, "'", `'"'"'`) + "'"
+		}
+
+		const special = "$`\"\\"
+		quoted := []rune{'"'}
+		for _, r := range word {
+			if strings.IndexRune(special, r) >= 0 {
+				quoted = append(quoted, '\\')
+			}
+			quoted = append(quoted, r)
+		}
+		return string(append(quoted, '"'))
+	},
 }
 
 // --- Utilities ---------------------------------------------------------------
@@ -910,8 +930,9 @@ func executorRunTask(ctx context.Context, task Task) error {
 	//  - we might have to clone submodules as well.
 	// Otherwise, we could download a source archive from Gitea,
 	// and use SFTP to upload it to the runner.
-	tmplScript, err := ttemplate.New("script").Parse(rt.Runner.Setup + "\n" +
-		rt.ProjectRunner.Setup + "\n" + rt.ProjectRunner.Build)
+	tmplScript, err := ttemplate.New("script").Funcs(shellFuncs).
+		Parse(rt.Runner.Setup + "\n" +
+			rt.ProjectRunner.Setup + "\n" + rt.ProjectRunner.Build)
 	if err != nil {
 		return fmt.Errorf("script: %w", err)
 	}

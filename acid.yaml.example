@@ -44,9 +44,9 @@ runners:
     setup: |
       set -ex
       sudo pacman -Syu --noconfirm git
-      git clone --recursive '{{.CloneURL}}' '{{.Repo}}'
-      cd '{{.Repo}}'
-      git -c advice.detachedHead=false checkout '{{.Hash}}'
+      git clone --recursive {{quote .CloneURL}} {{quote .Repo}}
+      cd {{quote .Repo}}
+      git -c advice.detachedHead=false checkout {{quote .Hash}}
 
 # Configuration for individual Gitea repositories.
 projects:
