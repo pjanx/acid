@@ -15,11 +15,14 @@ Synopsis
 Description
 -----------
 *acid* run without command arguments will start an HTTP server that creates
-and executes tasks upon receiving push notifications from a Gitea instance,
-according to the passed configuration file.
+and executes tasks against *git*(1) commits from a particular Gitea instance,
+in accordance with the passed configuration file.
 
 When a command is passed, *acid* will relay it to that running instance
-as an RPC call.
+of itself as an RPC call.
+
+Tasks can be triggered to run either upon receiving Gitea push events
+on the */push* endpoint, and/or using the RPC commands.
 
 Options
 -------
@@ -85,3 +88,7 @@ Reporting bugs
 --------------
 Use https://git.janouch.name/p/acid to report bugs, request features,
 or submit pull requests.
+
+See also
+--------
+*git*(1), *sh*(1)

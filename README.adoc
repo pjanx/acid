@@ -9,7 +9,7 @@ while the gist of it is actually very simple--run some stuff on new git commits.
 
 'acid' provides a simple web frontend, as well as a webhook endpoint
 for notifications about new commits.  The daemon is supposed to be "firewalled"
-by a normal HTTP server, and it will not provide TLS support to secure
+by a normal HTTP server, and as such it will not provide TLS support to secure
 communications.
 
 'acid' runs tasks over SSH, which should be universal enough.
@@ -25,6 +25,9 @@ Getting it to work
 
 You will need to write your own runner scripts, which may be nontrivial.
 The author suggests using __cloud-init__-enabled virtual machines with QEMU.
+
+For a step-by-step guide, see
+https://p.janouch.name/text/continuous-integration.html[the related article].
 
 Demo
 ----
