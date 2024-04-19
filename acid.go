@@ -81,8 +81,9 @@ type ConfigProject struct {
 }
 
 type ConfigProjectRunner struct {
-	Setup string `yaml:"setup"` // project setup script (SSH)
-	Build string `yaml:"build"` // project build script (SSH)
+	Setup   string `yaml:"setup"`   // project setup script (SSH)
+	Build   string `yaml:"build"`   // project build script (SSH)
+	Timeout string `yaml:"timeout"` // timeout duration
 }
 
 func parseConfig(path string) error {
@@ -936,6 +937,17 @@ func executorRunTask(ctx context.Context, task Task) error {
 	if err != nil {
 		return fmt.Errorf("script: %w", err)
 	}
+
+	// Lenient or not, some kind of a time limit is desirable.
+	timeout := time.Hour
+	if rt.ProjectRunner.Timeout != "" {
+		timeout, err = time.ParseDuration(rt.ProjectRunner.Timeout)
+		if err != nil {
+			return fmt.Errorf("timeout: %w", err)
+		}
+	}
+	ctx, cancelTimeout := context.WithTimeout(ctx, timeout)
+	defer cancelTimeout()
 
 	privateKey, err := os.ReadFile(rt.Runner.SSH.Identity)
 	if err != nil {
