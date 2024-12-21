@@ -1,2 +1,10 @@
 /acid
 /acid.1
+
+/acid.cflags
+/acid.config
+/acid.creator
+/acid.creator.user
+/acid.cxxflags
+/acid.files
+/acid.includes
