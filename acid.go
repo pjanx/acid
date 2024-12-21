@@ -66,10 +66,11 @@ type Config struct {
 }
 
 type ConfigRunner struct {
-	Name  string `yaml:"name"`  // descriptive name
-	Run   string `yaml:"run"`   // runner executable
-	Setup string `yaml:"setup"` // runner setup script (SSH)
-	SSH   struct {
+	Name   string `yaml:"name"`   // descriptive name
+	Manual bool   `yaml:"manual"` // only run on request
+	Run    string `yaml:"run"`    // runner executable
+	Setup  string `yaml:"setup"`  // runner setup script (SSH)
+	SSH    struct {
 		User     string `yaml:"user"`     // remote username
 		Address  string `yaml:"address"`  // TCP host:port
 		Identity string `yaml:"identity"` // private key path
@@ -78,6 +79,18 @@ type ConfigRunner struct {
 
 type ConfigProject struct {
 	Runners map[string]ConfigProjectRunner `yaml:"runners"`
+}
+
+func (cf *ConfigProject) AutomaticRunners() (runners []string) {
+	// We pass through unknown runner names,
+	// so that they can cause reference errors later.
+	for runner := range cf.Runners {
+		if r, _ := gConfig.Runners[runner]; !r.Manual {
+			runners = append(runners, runner)
+		}
+	}
+	sort.Strings(runners)
+	return
 }
 
 type ConfigProjectRunner struct {
@@ -379,12 +392,7 @@ func handlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runners := []string{}
-	for name := range project.Runners {
-		runners = append(runners, name)
-	}
-	sort.Strings(runners)
-
+	runners := project.AutomaticRunners()
 	if err := createTasks(r.Context(),
 		event.Repository.Owner.Username, event.Repository.Name,
 		event.HeadCommit.ID, runners); err != nil {
@@ -493,11 +501,8 @@ func rpcEnqueue(ctx context.Context,
 
 	runners := fs.Args()[3:]
 	if len(runners) == 0 {
-		for runner := range project.Runners {
-			runners = append(runners, runner)
-		}
+		runners = project.AutomaticRunners()
 	}
-	sort.Strings(runners)
 
 	for _, runner := range runners {
 		if _, ok := project.Runners[runner]; !ok {
