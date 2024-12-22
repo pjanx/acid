@@ -61,7 +61,13 @@ projects:
         # Project build script.
         build: |
           echo Computing line count...
-          find . -not -path '*/.*' -type f -print0 | xargs -0 cat | wc -l
+          mkdir ~/acid-deploy
+          find . -not -path '*/.*' -type f -print0 | xargs -0 cat | wc -l \
+            > ~/acid-deploy/count
+
+        # Project deployment script (runs locally in a temporary directory).
+        deploy: |
+          cat count
 
         # Time limit in time.ParseDuration format.
         # The default of one hour should suffice.

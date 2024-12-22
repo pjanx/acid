@@ -45,7 +45,7 @@ file present in the distribution.
 
 All paths are currently relative to the directory you launch *acid* from.
 
-The *notify*, *setup*, and *build* scripts are processed using Go's
+The *notify*, *setup*, *build*, and *deploy* scripts are processed using Go's
 _text/template_ package, and take an object describing the task,
 which has the following fields:
 
@@ -79,7 +79,8 @@ in *sh*(1) command arguments.
 
 Runners
 -------
-Runners receive the following additional environment variables:
+Runners and deploy scripts receive the following additional
+environment variables:
 
 *ACID_ROOT*::   The same as the base directory for configuration.
 *ACID_RUNNER*:: The same as *Runner* in script templates.
