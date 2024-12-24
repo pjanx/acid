@@ -790,11 +790,16 @@ type terminalWriter struct {
 	b   []byte
 	cur int
 	mu  sync.Mutex
+	tee io.WriteCloser
 }
 
 func (tw *terminalWriter) Write(p []byte) (written int, err error) {
 	tw.mu.Lock()
 	defer tw.mu.Unlock()
+
+	if tw.tee != nil {
+		tw.tee.Write(p)
+	}
 
 	// Extremely rudimentary emulation of a dumb terminal.
 	for _, b := range p {
@@ -918,7 +923,24 @@ func newRunningTask(task Task) (*RunningTask, error) {
 		return nil, fmt.Errorf("script/deploy: %w", err)
 	}
 
+	if os.Getenv("ACID_TERMINAL_DEBUG") != "" {
+		base := filepath.Join(executorTmpDir("/tmp"),
+			fmt.Sprintf("acid-%d-%s-%s-%s-",
+				task.ID, task.Owner, task.Repo, task.Runner))
+		rt.RunLog.tee, _ = os.Create(base + "runlog")
+		rt.TaskLog.tee, _ = os.Create(base + "tasklog")
+		// The deployment log should not be interesting.
+	}
 	return rt, nil
+}
+
+func (rt *RunningTask) close() {
+	for _, tee := range []io.WriteCloser{
+		rt.RunLog.tee, rt.TaskLog.tee, rt.DeployLog.tee} {
+		if tee != nil {
+			tee.Close()
+		}
+	}
 }
 
 // localEnv creates a process environment for locally run executables.
@@ -1009,6 +1031,14 @@ func executorLocalShell() string {
 	return "/bin/sh"
 }
 
+func executorTmpDir(fallback string) string {
+	// See also: https://systemd.io/TEMPORARY_DIRECTORIES/
+	if tmp := os.Getenv("TMPDIR"); tmp != "" {
+		return tmp
+	}
+	return fallback
+}
+
 func executorDeploy(
 	ctx context.Context, client *ssh.Client, rt *RunningTask) error {
 	script := bytes.NewBuffer(nil)
@@ -1023,13 +1053,7 @@ func executorDeploy(
 
 	// We expect the files to be moved elsewhere on the filesystem,
 	// and they may get very large, so avoid /tmp.
-	//
-	// See also: https://systemd.io/TEMPORARY_DIRECTORIES/
-	tmp := os.Getenv("TMPDIR")
-	if tmp == "" {
-		tmp = "/var/tmp"
-	}
-	dir := filepath.Join(tmp, "acid-deploy")
+	dir := filepath.Join(executorTmpDir("/var/tmp"), "acid-deploy")
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
@@ -1174,6 +1198,7 @@ func executorRunTask(ctx context.Context, task Task) error {
 		task.DeployLog = []byte{}
 		return task.update()
 	}
+	defer rt.close()
 
 	ctx, cancelTimeout := context.WithTimeout(ctx, rt.timeout)
 	defer cancelTimeout()
