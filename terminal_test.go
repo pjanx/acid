@@ -2,13 +2,39 @@ package main
 
 import "testing"
 
-// TODO(p): Add a lot more test cases.
+// This could be way more extensive, but we're not aiming for perfection.
 var tests = []struct {
 	push, want string
 }{
 	{
-		"\x1bc\x1b[?7l\x1b[2J\x1b[0mSeaBIOS\r",
-		"SeaBIOS\n",
+		// Escaping and UTF-8.
+		"\x03\x1bž\bř",
+		"^C^[ř\n",
+	},
+	{
+		// Several kinds of sequences to be ignored.
+		"\x1bc\x1b[?7l\x1b[2J\x1b[0;1mSeaBIOS\rTea",
+		"TeaBIOS\n",
+	},
+	{
+		// New origin and absolute positioning.
+		"Line 1\n\x1bcWine B\nFine 3\x1b[1;6H2\x1b[HL\nL",
+		"Line 1\nLine 2\nLine 3\n",
+	},
+	{
+		// In-line positioning (without corner cases).
+		"A\x1b[CB\x1b[2C?\x1b[DC\x1b[2D\b->",
+		"A B->C\n",
+	},
+	{
+		// Up and down.
+		"\nB\x1bMA\v\vC" + "\x1b[4EG" + "\x1b[FF" + "\x1b[2FD" + "\x1b[EE",
+		" A\nB\nC\nD\nE\nF\nG\n",
+	},
+	{
+		// In-line erasing.
+		"1234\b\b\x1b[K\n5678\b\b\x1b[0K\n" + "abcd\b\b\x1b[1K\nefgh\x1b[2K",
+		"12\n56\n  cd\n\n",
 	},
 }
 
