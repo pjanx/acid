@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -314,9 +315,9 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 		rt.DeployLog.mu.Lock()
 		defer rt.DeployLog.mu.Unlock()
 
-		task.RunLog = rt.RunLog.b
-		task.TaskLog = rt.TaskLog.b
-		task.DeployLog = rt.DeployLog.b
+		task.RunLog = slices.Clone(rt.RunLog.b)
+		task.TaskLog = slices.Clone(rt.TaskLog.b)
+		task.DeployLog = slices.Clone(rt.DeployLog.b)
 	}()
 
 	if err := templateTask.Execute(w, &task); err != nil {
