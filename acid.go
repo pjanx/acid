@@ -22,7 +22,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -308,16 +307,16 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		rt.RunLog.mu.Lock()
-		defer rt.RunLog.mu.Unlock()
-		rt.TaskLog.mu.Lock()
-		defer rt.TaskLog.mu.Unlock()
-		rt.DeployLog.mu.Lock()
-		defer rt.DeployLog.mu.Unlock()
+		rt.RunLog.Lock()
+		defer rt.RunLog.Unlock()
+		rt.TaskLog.Lock()
+		defer rt.TaskLog.Unlock()
+		rt.DeployLog.Lock()
+		defer rt.DeployLog.Unlock()
 
-		task.RunLog = slices.Clone(rt.RunLog.b)
-		task.TaskLog = slices.Clone(rt.TaskLog.b)
-		task.DeployLog = slices.Clone(rt.DeployLog.b)
+		task.RunLog = rt.RunLog.Serialize(0)
+		task.TaskLog = rt.TaskLog.Serialize(0)
+		task.DeployLog = rt.DeployLog.Serialize(0)
 	}()
 
 	if err := templateTask.Execute(w, &task); err != nil {
@@ -786,54 +785,6 @@ func notifierAwaken() {
 }
 
 // --- Executor ----------------------------------------------------------------
-
-type terminalWriter struct {
-	b   []byte
-	cur int
-	mu  sync.Mutex
-	tee io.WriteCloser
-}
-
-func (tw *terminalWriter) Write(p []byte) (written int, err error) {
-	tw.mu.Lock()
-	defer tw.mu.Unlock()
-
-	if tw.tee != nil {
-		tw.tee.Write(p)
-	}
-
-	// Extremely rudimentary emulation of a dumb terminal.
-	for _, b := range p {
-		// Enough is enough, writing too much is highly suspicious.
-		if len(tw.b) > 64<<20 {
-			return written, errors.New("too much terminal output")
-		}
-
-		switch b {
-		case '\b':
-			if tw.cur > 0 && tw.b[tw.cur-1] != '\n' {
-				tw.cur--
-			}
-		case '\r':
-			for tw.cur > 0 && tw.b[tw.cur-1] != '\n' {
-				tw.cur--
-			}
-		case '\n':
-			tw.b = append(tw.b, b)
-			tw.cur = len(tw.b)
-		default:
-			tw.b = append(tw.b[:tw.cur], b)
-			tw.cur = len(tw.b)
-		}
-
-		if err != nil {
-			break
-		}
-		written += 1
-	}
-	return
-}
-
 // ~~~ Running task ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // RunningTask stores all data pertaining to a currently running task.
@@ -928,8 +879,8 @@ func newRunningTask(task Task) (*RunningTask, error) {
 		base := filepath.Join(executorTmpDir("/tmp"),
 			fmt.Sprintf("acid-%d-%s-%s-%s-",
 				task.ID, task.Owner, task.Repo, task.Runner))
-		rt.RunLog.tee, _ = os.Create(base + "runlog")
-		rt.TaskLog.tee, _ = os.Create(base + "tasklog")
+		rt.RunLog.Tee, _ = os.Create(base + "runlog")
+		rt.TaskLog.Tee, _ = os.Create(base + "tasklog")
 		// The deployment log should not be interesting.
 	}
 	return rt, nil
@@ -937,7 +888,7 @@ func newRunningTask(task Task) (*RunningTask, error) {
 
 func (rt *RunningTask) close() {
 	for _, tee := range []io.WriteCloser{
-		rt.RunLog.tee, rt.TaskLog.tee, rt.DeployLog.tee} {
+		rt.RunLog.Tee, rt.TaskLog.Tee, rt.DeployLog.Tee} {
 		if tee != nil {
 			tee.Close()
 		}
@@ -962,9 +913,9 @@ func (rt *RunningTask) update() error {
 		{&rt.TaskLog, &rt.DB.TaskLog},
 		{&rt.DeployLog, &rt.DB.DeployLog},
 	} {
-		i.tw.mu.Lock()
-		defer i.tw.mu.Unlock()
-		if *i.log = bytes.Clone(i.tw.b); *i.log == nil {
+		i.tw.Lock()
+		defer i.tw.Unlock()
+		if *i.log = i.tw.Serialize(0); *i.log == nil {
 			*i.log = []byte{}
 		}
 	}
@@ -1581,8 +1532,30 @@ func callRPC(args []string) error {
 	return nil
 }
 
+// filterTTY exposes the internal virtual terminal filter.
+func filterTTY(path string) {
+	var r io.Reader = os.Stdin
+	if path != "-" {
+		if f, err := os.Open(path); err != nil {
+			log.Println(err)
+		} else {
+			r = f
+			defer f.Close()
+		}
+	}
+
+	var tw terminalWriter
+	if _, err := io.Copy(&tw, r); err != nil {
+		log.Printf("%s: %s\n", path, err)
+	}
+	if _, err := os.Stdout.Write(tw.Serialize(0)); err != nil {
+		log.Printf("%s: %s\n", path, err)
+	}
+}
+
 func main() {
 	version := flag.Bool("version", false, "show version and exit")
+	tty := flag.Bool("tty", false, "run the internal virtual terminal filter")
 
 	flag.Usage = func() {
 		f := flag.CommandLine.Output()
@@ -1598,6 +1571,12 @@ func main() {
 
 	if *version {
 		fmt.Printf("%s %s\n", projectName, projectVersion)
+		return
+	}
+	if *tty {
+		for _, path := range flag.Args() {
+			filterTTY(path)
+		}
 		return
 	}
 
