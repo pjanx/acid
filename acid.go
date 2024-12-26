@@ -1317,19 +1317,20 @@ func executorRunTask(ctx context.Context, task Task) error {
 	defer client.Close()
 
 	var (
-		ee1 *ssh.ExitError
-		ee2 *executorError
+		eeSSH  *ssh.ExitError
+		eeExec *exec.ExitError
+		ee3    *executorError
 	)
 
 	err = executorBuild(ctxRunner, client, rt)
 	if err != nil {
 		locked(func() {
-			if errors.As(err, &ee1) {
+			if errors.As(err, &eeSSH) {
 				rt.DB.State, rt.DB.Detail = taskStateFailed, "Scripts failed"
 				fmt.Fprintf(&rt.TaskLog, "\n%s\n", err)
-			} else if errors.As(err, &ee2) {
-				rt.DB.State, rt.DB.Detail = taskStateError, ee2.Detail
-				fmt.Fprintf(&rt.TaskLog, "\n%s\n", ee2.Err)
+			} else if errors.As(err, &ee3) {
+				rt.DB.State, rt.DB.Detail = taskStateError, ee3.Detail
+				fmt.Fprintf(&rt.TaskLog, "\n%s\n", ee3.Err)
 			} else {
 				rt.DB.State, rt.DB.Detail = taskStateError, ""
 				fmt.Fprintf(&rt.TaskLog, "\n%s\n", err)
@@ -1349,12 +1350,12 @@ func executorRunTask(ctx context.Context, task Task) error {
 	locked(func() {
 		if err == nil {
 			rt.DB.State, rt.DB.Detail = taskStateSuccess, ""
-		} else if errors.As(err, &ee1) {
+		} else if errors.As(err, &eeExec) {
 			rt.DB.State, rt.DB.Detail = taskStateFailed, "Deployment failed"
 			fmt.Fprintf(&rt.DeployLog, "\n%s\n", err)
-		} else if errors.As(err, &ee2) {
-			rt.DB.State, rt.DB.Detail = taskStateError, ee2.Detail
-			fmt.Fprintf(&rt.DeployLog, "\n%s\n", ee2.Err)
+		} else if errors.As(err, &ee3) {
+			rt.DB.State, rt.DB.Detail = taskStateError, ee3.Detail
+			fmt.Fprintf(&rt.DeployLog, "\n%s\n", ee3.Err)
 		} else {
 			rt.DB.State, rt.DB.Detail = taskStateError, ""
 			fmt.Fprintf(&rt.DeployLog, "\n%s\n", err)
