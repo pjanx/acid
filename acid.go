@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	ttemplate "text/template"
 	"time"
@@ -40,9 +41,9 @@ var (
 	projectName    = "acid"
 	projectVersion = "?"
 
-	gConfig       Config = Config{Listen: ":http"}
-	gNotifyScript *ttemplate.Template
-	gDB           *sql.DB
+	gConfigPath string
+	gConfig     atomic.Pointer[Config]
+	gDB         *sql.DB
 
 	gNotifierSignal = make(chan struct{}, 1)
 	gExecutorSignal = make(chan struct{}, 1)
@@ -51,6 +52,8 @@ var (
 	gRunningMutex sync.Mutex
 	gRunning      = make(map[int64]*RunningTask)
 )
+
+func getConfig() *Config { return gConfig.Load() }
 
 // --- Config ------------------------------------------------------------------
 
@@ -65,6 +68,8 @@ type Config struct {
 
 	Runners  map[string]ConfigRunner  `yaml:"runners"`  // script runners
 	Projects map[string]ConfigProject `yaml:"projects"` // configured projects
+
+	notifyTemplate *ttemplate.Template
 }
 
 type ConfigRunner struct {
@@ -86,8 +91,9 @@ type ConfigProject struct {
 func (cf *ConfigProject) AutomaticRunners() (runners []string) {
 	// We pass through unknown runner names,
 	// so that they can cause reference errors later.
+	config := getConfig()
 	for runner := range cf.Runners {
-		if r, _ := gConfig.Runners[runner]; !r.Manual {
+		if r, _ := config.Runners[runner]; !r.Manual {
 			runners = append(runners, runner)
 		}
 	}
@@ -102,17 +108,28 @@ type ConfigProjectRunner struct {
 	Timeout string `yaml:"timeout"` // timeout duration
 }
 
-func parseConfig(path string) error {
-	if f, err := os.Open(path); err != nil {
+// loadConfig reloads configuration.
+// Beware that changes do not get applied globally at the same moment.
+func loadConfig() error {
+	new := &Config{}
+	if f, err := os.Open(gConfigPath); err != nil {
 		return err
-	} else if err = yaml.NewDecoder(f).Decode(&gConfig); err != nil {
+	} else if err = yaml.NewDecoder(f).Decode(new); err != nil {
 		return err
+	}
+	if old := getConfig(); old != nil && old.DB != new.DB {
+		return fmt.Errorf("the database file cannot be changed in runtime")
 	}
 
 	var err error
-	gNotifyScript, err =
-		ttemplate.New("notify").Funcs(shellFuncs).Parse(gConfig.Notify)
-	return err
+	new.notifyTemplate, err =
+		ttemplate.New("notify").Funcs(shellFuncs).Parse(new.Notify)
+	if err != nil {
+		return err
+	}
+
+	gConfig.Store(new)
+	return nil
 }
 
 var shellFuncs = ttemplate.FuncMap{
@@ -137,7 +154,7 @@ var shellFuncs = ttemplate.FuncMap{
 // --- Utilities ---------------------------------------------------------------
 
 func giteaSign(b []byte) string {
-	payloadHmac := hmac.New(sha256.New, []byte(gConfig.Secret))
+	payloadHmac := hmac.New(sha256.New, []byte(getConfig().Secret))
 	payloadHmac.Write(b)
 	return hex.EncodeToString(payloadHmac.Sum(nil))
 }
@@ -145,9 +162,9 @@ func giteaSign(b []byte) string {
 func giteaNewRequest(ctx context.Context, method, path string, body io.Reader) (
 	*http.Request, error) {
 	req, err := http.NewRequestWithContext(
-		ctx, method, gConfig.Gitea+path, body)
+		ctx, method, getConfig().Gitea+path, body)
 	if req != nil {
-		req.Header.Set("Authorization", "token "+gConfig.Token)
+		req.Header.Set("Authorization", "token "+getConfig().Token)
 		req.Header.Set("Accept", "application/json")
 	}
 	return req, err
@@ -397,7 +414,7 @@ func handlePush(w http.ResponseWriter, r *http.Request) {
 	log.Printf("received push: %s %s\n",
 		event.Repository.FullName, event.HeadCommit.ID)
 
-	project, ok := gConfig.Projects[event.Repository.FullName]
+	project, ok := getConfig().Projects[event.Repository.FullName]
 	if !ok {
 		// This is okay, don't set any commit statuses.
 		fmt.Fprintf(w, "The project is not configured.")
@@ -506,7 +523,7 @@ func rpcEnqueue(ctx context.Context,
 		return fmt.Errorf("%s: %w", ref, err)
 	}
 
-	project, ok := gConfig.Projects[owner+"/"+repo]
+	project, ok := getConfig().Projects[owner+"/"+repo]
 	if !ok {
 		return fmt.Errorf("project configuration not found")
 	}
@@ -558,6 +575,17 @@ func rpcRestart(ctx context.Context,
 	return nil
 }
 
+func rpcReload(ctx context.Context,
+	w io.Writer, fs *flag.FlagSet, args []string) error {
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return errWrongUsage
+	}
+	return loadConfig()
+}
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 var rpcCommands = map[string]struct {
@@ -570,6 +598,8 @@ var rpcCommands = map[string]struct {
 		"Create or restart tasks for the given reference."},
 	"restart": {rpcRestart, "[ID]...",
 		"Schedule tasks with the given IDs to be rerun."},
+	"reload": {rpcReload, "",
+		"Reload configuration."},
 }
 
 func rpcPrintCommands(w io.Writer) {
@@ -656,7 +686,7 @@ func handleRPC(w http.ResponseWriter, r *http.Request) {
 
 func notifierRunCommand(ctx context.Context, task Task) {
 	script := bytes.NewBuffer(nil)
-	if err := gNotifyScript.Execute(script, &task); err != nil {
+	if err := getConfig().notifyTemplate.Execute(script, &task); err != nil {
 		log.Printf("error: notify: %s", err)
 		return
 	}
@@ -683,13 +713,14 @@ func notifierNotify(ctx context.Context, task Task) error {
 		TargetURL   string `json:"target_url"`
 	}{}
 
-	runner, ok := gConfig.Runners[task.Runner]
+	config := getConfig()
+	runner, ok := config.Runners[task.Runner]
 	if !ok {
 		log.Printf("task %d has an unknown runner %s\n", task.ID, task.Runner)
 		return nil
 	}
 	payload.Context = runner.Name
-	payload.TargetURL = fmt.Sprintf("%s/task/%d", gConfig.Root, task.ID)
+	payload.TargetURL = fmt.Sprintf("%s/task/%d", config.Root, task.ID)
 
 	switch task.State {
 	case taskStateNew:
@@ -807,13 +838,14 @@ type RunningTask struct {
 // newRunningTask prepares a task for running, without executing anything yet.
 func newRunningTask(task Task) (*RunningTask, error) {
 	rt := &RunningTask{DB: task}
+	config := getConfig()
 
 	var ok bool
-	rt.Runner, ok = gConfig.Runners[rt.DB.Runner]
+	rt.Runner, ok = config.Runners[rt.DB.Runner]
 	if !ok {
 		return nil, fmt.Errorf("unknown runner: %s", rt.DB.Runner)
 	}
-	project, ok := gConfig.Projects[rt.DB.FullName()]
+	project, ok := config.Projects[rt.DB.FullName()]
 	if !ok {
 		return nil, fmt.Errorf("project configuration not found")
 	}
@@ -1381,7 +1413,7 @@ type Task struct {
 func (t *Task) FullName() string { return t.Owner + "/" + t.Repo }
 
 func (t *Task) RunnerName() string {
-	if runner, ok := gConfig.Runners[t.Runner]; !ok {
+	if runner, ok := getConfig().Runners[t.Runner]; !ok {
 		return t.Runner
 	} else {
 		return runner.Name
@@ -1389,20 +1421,20 @@ func (t *Task) RunnerName() string {
 }
 
 func (t *Task) URL() string {
-	return fmt.Sprintf("%s/task/%d", gConfig.Root, t.ID)
+	return fmt.Sprintf("%s/task/%d", getConfig().Root, t.ID)
 }
 
 func (t *Task) RepoURL() string {
-	return fmt.Sprintf("%s/%s/%s", gConfig.Gitea, t.Owner, t.Repo)
+	return fmt.Sprintf("%s/%s/%s", getConfig().Gitea, t.Owner, t.Repo)
 }
 
 func (t *Task) CommitURL() string {
 	return fmt.Sprintf("%s/%s/%s/commit/%s",
-		gConfig.Gitea, t.Owner, t.Repo, t.Hash)
+		getConfig().Gitea, t.Owner, t.Repo, t.Hash)
 }
 
 func (t *Task) CloneURL() string {
-	return fmt.Sprintf("%s/%s/%s.git", gConfig.Gitea, t.Owner, t.Repo)
+	return fmt.Sprintf("%s/%s/%s.git", getConfig().Gitea, t.Owner, t.Repo)
 }
 
 func (t *Task) update() error {
@@ -1509,7 +1541,7 @@ func callRPC(args []string) error {
 	}
 
 	req, err := http.NewRequest(http.MethodPost,
-		fmt.Sprintf("%s/rpc", gConfig.Root), bytes.NewReader(body))
+		fmt.Sprintf("%s/rpc", getConfig().Root), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -1580,7 +1612,8 @@ func main() {
 		return
 	}
 
-	if err := parseConfig(flag.Arg(0)); err != nil {
+	gConfigPath = flag.Arg(0)
+	if err := loadConfig(); err != nil {
 		log.Fatalln(err)
 	}
 	if flag.NArg() > 1 {
@@ -1590,7 +1623,7 @@ func main() {
 		return
 	}
 
-	if err := dbOpen(gConfig.DB); err != nil {
+	if err := dbOpen(getConfig().DB); err != nil {
 		log.Fatalln(err)
 	}
 	defer gDB.Close()
@@ -1599,7 +1632,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(
 		context.Background(), syscall.SIGINT, syscall.SIGTERM)
 
-	server := &http.Server{Addr: gConfig.Listen}
+	server := &http.Server{Addr: getConfig().Listen}
 	http.HandleFunc("/{$}", handleTasks)
 	http.HandleFunc("/task/{id}", handleTask)
 	http.HandleFunc("/push", handlePush)

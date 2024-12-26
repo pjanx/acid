@@ -37,6 +37,8 @@ Commands
 *restart* [_ID_]...::
 	Schedule tasks with the given IDs to be rerun.
 	Run this command without arguments to pick up external database changes.
+*reload*::
+	Reload configuration.
 
 Configuration
 -------------
