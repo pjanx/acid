@@ -67,6 +67,17 @@ which has the following fields:
 *RunnerName*::
 	Descriptive name of the runner.
 
+// Intentionally not documenting CreatedUnix, ChangedUnix, DurationSeconds,
+// which can be derived from the objects.
+*Created*, *Changed*::
+	`*time.Time` of task creation and last task state change respectively,
+	or nil if not known.
+*CreatedAgo*, *ChangedAgo*::
+	Abbreviated human-friendly relative elapsed time duration
+	since *Created* and *Changed* respectively.
+*Duration*::
+	`*time.Duration` of the last run in seconds, or nil if not known.
+
 *URL*::
 	*acid* link to the task, where its log output can be seen.
 *RepoURL*::

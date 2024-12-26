@@ -30,6 +30,7 @@ import (
 	"syscall"
 	ttemplate "text/template"
 	"time"
+	"unicode"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/pkg/sftp"
@@ -173,6 +174,7 @@ func giteaNewRequest(ctx context.Context, method, path string, body io.Reader) (
 func getTasks(ctx context.Context, query string, args ...any) ([]Task, error) {
 	rows, err := gDB.QueryContext(ctx, `
 		SELECT id, owner, repo, hash, runner,
+			created, changed, duration,
 			state, detail, notified,
 			runlog, tasklog, deploylog FROM task `+query, args...)
 	if err != nil {
@@ -184,11 +186,13 @@ func getTasks(ctx context.Context, query string, args ...any) ([]Task, error) {
 	for rows.Next() {
 		var t Task
 		err := rows.Scan(&t.ID, &t.Owner, &t.Repo, &t.Hash, &t.Runner,
+			&t.CreatedUnix, &t.ChangedUnix, &t.DurationSeconds,
 			&t.State, &t.Detail, &t.Notified,
 			&t.RunLog, &t.TaskLog, &t.DeployLog)
 		if err != nil {
 			return nil, err
 		}
+		// We could also update some fields from gRunning.
 		tasks = append(tasks, t)
 	}
 	return tasks, rows.Err()
@@ -209,6 +213,8 @@ var templateTasks = template.Must(template.New("tasks").Parse(`
 <thead>
 	<tr>
 		<th>ID</th>
+		<th>Created</th>
+		<th>Changed</th>
 		<th>Repository</th>
 		<th>Hash</th>
 		<th>Runner</th>
@@ -221,6 +227,8 @@ var templateTasks = template.Must(template.New("tasks").Parse(`
 {{range .}}
 	<tr>
 		<td><a href="task/{{.ID}}">{{.ID}}</a></td>
+		<td align="right"><span title="{{.Created}}">{{.CreatedAgo}}</span></td>
+		<td align="right"><span title="{{.Changed}}">{{.ChangedAgo}}</span></td>
 		<td><a href="{{.RepoURL}}">{{.FullName}}</a></td>
 		<td><a href="{{.CommitURL}}">{{.Hash}}</a></td>
 		<td>{{.RunnerName}}</td>
@@ -262,6 +270,14 @@ var templateTask = template.Must(template.New("tasks").Parse(`
 <body>
 <h1><a href="..">Tasks</a> &raquo; {{.ID}}</h1>
 <dl>
+{{if .Created}}
+<dt>Created</dt>
+	<dd><span title="{{.Created}}">{{.CreatedAgo}} ago</span></dd>
+{{end}}
+{{if .Changed}}
+<dt>Changed</dt>
+	<dd><span title="{{.Changed}}">{{.ChangedAgo}} ago</span></dd>
+{{end}}
 <dt>Project</dt>
 	<dd><a href="{{.RepoURL}}">{{.FullName}}</a></dd>
 <dt>Commit</dt>
@@ -272,6 +288,10 @@ var templateTask = template.Must(template.New("tasks").Parse(`
 	<dd>{{.State}}{{if .Detail}} ({{.Detail}}){{end}}</dd>
 <dt>Notified</dt>
 	<dd>{{.Notified}}</dd>
+{{if .Duration}}
+<dt>Duration</dt>
+	<dd>{{.Duration}}</dd>
+{{end}}
 </dl>
 {{if .RunLog}}
 <h2>Runner log</h2>
@@ -324,6 +344,8 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		task.DurationSeconds = rt.elapsed()
+
 		rt.RunLog.Lock()
 		defer rt.RunLog.Unlock()
 		rt.TaskLog.Lock()
@@ -364,8 +386,9 @@ func createTasks(ctx context.Context,
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO task(owner, repo, hash, runner)
-		VALUES (?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(
+		`INSERT INTO task(owner, repo, hash, runner, created, changed)
+		VALUES (?, ?, ?, ?, unixepoch('now'), unixepoch('now'))`)
 	if err != nil {
 		return err
 	}
@@ -446,8 +469,11 @@ func rpcRestartOne(ctx context.Context, id int64) error {
 
 	// The executor bumps to "running" after inserting into gRunning,
 	// so we should not need to exclude that state here.
-	result, err := gDB.ExecContext(ctx, `UPDATE task
-		SET state = ?, detail = '', notified = 0 WHERE id = ?`,
+	//
+	// We deliberately do not clear previous run data (duration, *log).
+	result, err := gDB.ExecContext(ctx,
+		`UPDATE task SET changed = unixepoch('now'),
+		state = ?, detail = '', notified = 0 WHERE id = ?`,
 		taskStateNew, id)
 	if err != nil {
 		return fmt.Errorf("%d: %w", id, err)
@@ -840,6 +866,9 @@ func newRunningTask(task Task) (*RunningTask, error) {
 	rt := &RunningTask{DB: task}
 	config := getConfig()
 
+	// This is for our own tracking, not actually written to database.
+	rt.DB.ChangedUnix = time.Now().Unix()
+
 	var ok bool
 	rt.Runner, ok = config.Runners[rt.DB.Runner]
 	if !ok {
@@ -935,6 +964,10 @@ func (rt *RunningTask) localEnv() []string {
 	)
 }
 
+func (rt *RunningTask) elapsed() int64 {
+	return int64(time.Since(time.Unix(rt.DB.ChangedUnix, 0)).Seconds())
+}
+
 // update stores the running task's state in the database.
 func (rt *RunningTask) update() error {
 	for _, i := range []struct {
@@ -951,6 +984,7 @@ func (rt *RunningTask) update() error {
 			*i.log = []byte{}
 		}
 	}
+	rt.DB.DurationSeconds = rt.elapsed()
 	return rt.DB.update()
 }
 
@@ -1175,6 +1209,7 @@ func executorConnect(
 func executorRunTask(ctx context.Context, task Task) error {
 	rt, err := newRunningTask(task)
 	if err != nil {
+		task.DurationSeconds = 0
 		task.State, task.Detail = taskStateError, "Misconfigured"
 		task.Notified = 0
 		task.RunLog = []byte(err.Error())
@@ -1194,6 +1229,7 @@ func executorRunTask(ctx context.Context, task Task) error {
 		f()
 	}
 	locked(func() {
+		rt.DB.DurationSeconds = 0
 		rt.DB.State, rt.DB.Detail = taskStateRunning, ""
 		rt.DB.Notified = 0
 		rt.DB.RunLog = []byte{}
@@ -1402,6 +1438,11 @@ type Task struct {
 	Hash   string
 	Runner string
 
+	// True database names for these are occupied by accessors.
+	CreatedUnix     int64
+	ChangedUnix     int64
+	DurationSeconds int64
+
 	State     taskState
 	Detail    string
 	Notified  int64
@@ -1437,10 +1478,64 @@ func (t *Task) CloneURL() string {
 	return fmt.Sprintf("%s/%s/%s.git", getConfig().Gitea, t.Owner, t.Repo)
 }
 
+func shortDurationString(d time.Duration) string {
+	rs := []rune(d.Truncate(time.Second).String())
+	for i, r := range rs {
+		if !unicode.IsLetter(r) {
+			continue
+		}
+		i++
+		for i < len(rs) && unicode.IsLetter(rs[i]) {
+			i++
+		}
+		return string(rs[:i])
+	}
+	return string(rs)
+}
+
+func (t *Task) Created() *time.Time {
+	if t.CreatedUnix == 0 {
+		return nil
+	}
+	tt := time.Unix(t.CreatedUnix, 0)
+	return &tt
+}
+func (t *Task) Changed() *time.Time {
+	if t.ChangedUnix == 0 {
+		return nil
+	}
+	tt := time.Unix(t.ChangedUnix, 0)
+	return &tt
+}
+
+func (t *Task) CreatedAgo() string {
+	if t.CreatedUnix == 0 {
+		return ""
+	}
+	return shortDurationString(time.Since(*t.Created()))
+}
+
+func (t *Task) ChangedAgo() string {
+	if t.ChangedUnix == 0 {
+		return ""
+	}
+	return shortDurationString(time.Since(*t.Changed()))
+}
+
+func (t *Task) Duration() *time.Duration {
+	if t.DurationSeconds == 0 {
+		return nil
+	}
+	td := time.Duration(t.DurationSeconds * int64(time.Second))
+	return &td
+}
+
 func (t *Task) update() error {
-	_, err := gDB.ExecContext(context.Background(), `UPDATE task
-		SET state = ?, detail = ?, notified = ?,
+	_, err := gDB.ExecContext(context.Background(),
+		`UPDATE task SET changed = unixepoch('now'), duration = ?,
+		state = ?, detail = ?, notified = ?,
 		runlog = ?, tasklog = ?, deploylog = ? WHERE id = ?`,
+		t.DurationSeconds,
 		t.State, t.Detail, t.Notified,
 		t.RunLog, t.TaskLog, t.DeployLog, t.ID)
 	if err == nil {
@@ -1461,6 +1556,10 @@ CREATE TABLE IF NOT EXISTS task(
 	repo      TEXT NOT NULL,     -- Gitea repository name
 	hash      TEXT NOT NULL,     -- commit hash
 	runner    TEXT NOT NULL,     -- the runner to use
+
+	created   INTEGER NOT NULL DEFAULT 0,    -- creation timestamp
+	changed   INTEGER NOT NULL DEFAULT 0,    -- last state change timestamp
+	duration  INTEGER NOT NULL DEFAULT 0,    -- duration of last run
 
 	state     INTEGER NOT NULL DEFAULT 0,    -- task state
 	detail    TEXT    NOT NULL DEFAULT '',   -- task state detail
@@ -1519,13 +1618,25 @@ func dbOpen(path string) error {
 			`task`, `deploylog`, `BLOB NOT NULL DEFAULT x''`); err != nil {
 			return err
 		}
-		break
 	case 1:
+		if err = dbEnsureColumn(tx,
+			`task`, `created`, `INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+		if err = dbEnsureColumn(tx,
+			`task`, `changed`, `INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+		if err = dbEnsureColumn(tx,
+			`task`, `duration`, `INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	case 2:
 		// The next migration goes here, remember to increment the number below.
 	}
 
 	if _, err = tx.Exec(
-		`PRAGMA user_version = ` + strconv.Itoa(1)); err != nil {
+		`PRAGMA user_version = ` + strconv.Itoa(2)); err != nil {
 		return err
 	}
 	return tx.Commit()
