@@ -47,6 +47,16 @@ func (tw *terminalWriter) log(format string, v ...interface{}) {
 	}
 }
 
+// SerializeUpdates returns an update block for a client with a given last line,
+// and the index of the first line in the update block.
+func (tw *terminalWriter) SerializeUpdates(last int) (string, int) {
+	if last < 0 || last >= len(tw.lines) {
+		return "", last
+	}
+	top := tw.lines[last].updateGroup
+	return string(tw.Serialize(top)), top
+}
+
 func (tw *terminalWriter) Serialize(top int) []byte {
 	var b bytes.Buffer
 	for i := top; i < len(tw.lines); i++ {
@@ -104,7 +114,7 @@ func (tw *terminalWriter) processPrint(r rune) {
 	// Refresh update trackers, if necessary.
 	if tw.lines[len(tw.lines)-1].updateGroup > tw.line {
 		for i := tw.line; i < len(tw.lines); i++ {
-			tw.lines[i].updateGroup = tw.line
+			tw.lines[i].updateGroup = min(tw.lines[i].updateGroup, tw.line)
 		}
 	}
 

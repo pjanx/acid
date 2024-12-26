@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // This could be way more extensive, but we're not aiming for perfection.
 var tests = []struct {
@@ -66,5 +69,32 @@ Loop:
 		if have != test.want {
 			t.Errorf("%#v: %#v; want %#v", test.push, have, test.want)
 		}
+	}
+}
+
+func TestTerminalUpdateGroups(t *testing.T) {
+	tw := terminalWriter{}
+	collect := func() (have []int) {
+		for _, line := range tw.lines {
+			have = append(have, line.updateGroup)
+		}
+		return
+	}
+
+	// 0: A      0 0 0
+	// 1: B X    1 1 1
+	// 2: C Y 1  2 1 1
+	// 3:   Z 2    3 2
+	// 4:     3      4
+	tw.Write([]byte("A\nB\nC\x1b[FX\nY\nZ"))
+	have, want := collect(), []int{0, 1, 1, 3}
+	if !slices.Equal(want, have) {
+		t.Errorf("update groups: %+v; want: %+v", have, want)
+	}
+
+	tw.Write([]byte("\x1b[F1\n2\n3"))
+	have, want = collect(), []int{0, 1, 1, 2, 4}
+	if !slices.Equal(want, have) {
+		t.Errorf("update groups: %+v; want: %+v", have, want)
 	}
 }

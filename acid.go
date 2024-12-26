@@ -263,52 +263,181 @@ var templateTask = template.Must(template.New("tasks").Parse(`
 <head>
 <title>Task {{.ID}}</title>
 <meta charset="utf-8">
-{{if .IsRunning}}
-<meta http-equiv="refresh" content="5">
-{{end}}
 </head>
 <body>
 <h1><a href="..">Tasks</a> &raquo; {{.ID}}</h1>
 <dl>
-{{if .Created}}
+<!-- Remember to synchronise these lists with Javascript updates. -->
+{{if .Created -}}
 <dt>Created</dt>
-	<dd><span title="{{.Created}}">{{.CreatedAgo}} ago</span></dd>
-{{end}}
-{{if .Changed}}
+	<dd><span id="created" title="{{.Created}}">{{.CreatedAgo}} ago</span></dd>
+{{end -}}
+{{if .Changed -}}
 <dt>Changed</dt>
-	<dd><span title="{{.Changed}}">{{.ChangedAgo}} ago</span></dd>
-{{end}}
+	<dd><span id="changed" title="{{.Changed}}">{{.ChangedAgo}} ago</span></dd>
+{{end -}}
 <dt>Project</dt>
-	<dd><a href="{{.RepoURL}}">{{.FullName}}</a></dd>
+	<dd id="project"><a href="{{.RepoURL}}">{{.FullName}}</a></dd>
 <dt>Commit</dt>
-	<dd><a href="{{.CommitURL}}">{{.Hash}}</a></dd>
+	<dd id="commit"><a href="{{.CommitURL}}">{{.Hash}}</a></dd>
 <dt>Runner</dt>
-	<dd>{{.RunnerName}}</dd>
+	<dd id="runner">{{.RunnerName}}</dd>
 <dt>State</dt>
-	<dd>{{.State}}{{if .Detail}} ({{.Detail}}){{end}}</dd>
+	<dd id="state">{{.State}}{{if .Detail}} ({{.Detail}}){{end}}</dd>
 <dt>Notified</dt>
-	<dd>{{.Notified}}</dd>
-{{if .Duration}}
+	<dd id="notified">{{.Notified}}</dd>
 <dt>Duration</dt>
-	<dd>{{.Duration}}</dd>
-{{end}}
+	<dd id="duration">{{if .Duration}}{{.Duration}}{{else}}&mdash;{{end}}</dd>
 </dl>
-{{if .RunLog}}
-<h2>Runner log</h2>
-<pre>{{printf "%s" .RunLog}}</pre>
-{{end}}
-{{if .TaskLog}}
-<h2>Task log</h2>
-<pre>{{printf "%s" .TaskLog}}</pre>
-{{end}}
-{{if .DeployLog}}
-<h2>Deploy log</h2>
-<pre>{{printf "%s" .DeployLog}}</pre>
-{{end}}
-</table>
+
+<h2 id="run"{{if not .RunLog}} hidden{{end}}>Runner log</h2>
+<pre id="runlog"{{if not .RunLog}} hidden{{
+end}}>{{printf "%s" .RunLog}}</pre>
+<h2 id="task"{{if not .TaskLog}} hidden{{end}}>Task log</h2>
+<pre id="tasklog"{{if not .TaskLog}} hidden{{
+end}}>{{printf "%s" .TaskLog}}</pre>
+<h2 id="deploy"{{if not .DeployLog}} hidden{{end}}>Deploy log</h2>
+<pre id="deploylog"{{if not .DeployLog}} hidden{{
+end}}>{{printf "%s" .DeployLog}}</pre>
+
+{{if .IsRunning -}}
+<script>
+function get(id) {
+	return document.getElementById(id)
+}
+function getLog(id) {
+	const header = document.getElementById(id)
+	const log = document.getElementById(id + 'log')
+	const text = log.textContent
+	// lines[-1] is an implementation detail of terminalWriter.Serialize,
+	// lines[-2] is the actual last line.
+	const last = Math.max(0, text.split('\n').length - 2)
+	return {header, log, text, last}
+}
+function refreshLog(log, top, changed) {
+	if (top <= 0)
+		log.log.textContent = changed
+	else
+		log.log.textContent =
+			log.text.split('\n').slice(0, top).join('\n') + '\n' + changed
+
+	const empty = log.log.textContent === ''
+	log.header.hidden = empty
+	log.log.hidden = empty
+}
+let refresher = setInterval(() => {
+	let run = getLog('run'), task = getLog('task'), deploy = getLog('deploy')
+
+    const url = new URL(window.location.href)
+	url.search = ''
+	url.searchParams.set('json', '')
+	url.searchParams.set('run', run.last)
+	url.searchParams.set('task', task.last)
+	url.searchParams.set('deploy', deploy.last)
+    fetch(url.toString()).then(response => {
+		if (!response.ok)
+			throw response.statusText
+		return response.json()
+	}).then(data => {
+		const scroll = window.scrollY + window.innerHeight
+			>= document.documentElement.scrollHeight
+		if (data.Created) {
+			get('created').title = data.Created
+			get('created').textContent = data.CreatedAgo + " ago"
+		}
+		if (data.Changed) {
+			get('changed').title = data.Changed
+			get('changed').textContent = data.ChangedAgo + " ago"
+		}
+		get('state').textContent = data.State
+		if (data.Detail !== '')
+			get('state').textContent += " (" + data.Detail + ")"
+		get('notified').textContent = String(data.Notified)
+		if (data.Duration)
+			get('duration').textContent = data.Duration
+
+		refreshLog(run, data.RunLogTop, data.RunLog)
+		refreshLog(task, data.TaskLogTop, data.TaskLog)
+		refreshLog(deploy, data.DeployLogTop, data.DeployLog)
+
+		if (scroll)
+			document.documentElement.scrollTop =
+				document.documentElement.scrollHeight
+		if (!data.IsRunning)
+			clearInterval(refresher)
+	}).catch(error => {
+		alert(error)
+		clearInterval(refresher)
+	})
+}, 1000 /* For faster updates than this, we should use WebSockets. */)
+</script>
+{{end -}}
+
 </body>
 </html>
 `))
+
+// handlerTask serves as the data for JSON encoding and the task HTML template.
+// It needs to explicitly include many convenience method results.
+type handlerTask struct {
+	Task
+	IsRunning bool
+
+	Created      *string // Task.Created?.String()
+	Changed      *string // Task.Changed?.String()
+	CreatedAgo   string  // Task.CreatedAgo()
+	ChangedAgo   string  // Task.ChangedAgo()
+	Duration     *string // Task.Duration?.String()
+	State        string  // Task.State.String()
+	RunLog       string
+	RunLogTop    int
+	TaskLog      string
+	TaskLogTop   int
+	DeployLog    string
+	DeployLogTop int
+}
+
+func toNilableString[T fmt.Stringer](stringer *T) *string {
+	if stringer == nil {
+		return nil
+	}
+	s := (*stringer).String()
+	return &s
+}
+
+func newHandlerTask(task Task) handlerTask {
+	return handlerTask{
+		Task:      task,
+		RunLog:    string(task.RunLog),
+		TaskLog:   string(task.TaskLog),
+		DeployLog: string(task.DeployLog),
+
+		Created:    toNilableString(task.Created()),
+		Changed:    toNilableString(task.Changed()),
+		CreatedAgo: task.CreatedAgo(),
+		ChangedAgo: task.ChangedAgo(),
+		Duration:   toNilableString(task.Duration()),
+		State:      task.State.String(),
+	}
+}
+
+func (ht *handlerTask) updateFromRunning(
+	rt *RunningTask, lastRun, lastTask, lastDeploy int) {
+	ht.IsRunning = true
+	ht.Task.DurationSeconds = rt.elapsed()
+	ht.Duration = toNilableString(ht.Task.Duration())
+
+	rt.RunLog.Lock()
+	defer rt.RunLog.Unlock()
+	rt.TaskLog.Lock()
+	defer rt.TaskLog.Unlock()
+	rt.DeployLog.Lock()
+	defer rt.DeployLog.Unlock()
+
+	ht.RunLog, ht.RunLogTop = rt.RunLog.SerializeUpdates(lastRun)
+	ht.TaskLog, ht.TaskLogTop = rt.TaskLog.SerializeUpdates(lastTask)
+	ht.DeployLog, ht.DeployLogTop = rt.DeployLog.SerializeUpdates(lastDeploy)
+}
 
 func handleTask(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
@@ -330,36 +459,32 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task := struct {
-		Task
-		IsRunning bool
-	}{Task: tasks[0]}
+	// These are intended for running tasks,
+	// so don't reprocess DB logs, which would only help the last update.
+	q := r.URL.Query()
+	lastRun, _ := strconv.Atoi(q.Get("run"))
+	lastTask, _ := strconv.Atoi(q.Get("task"))
+	lastDeploy, _ := strconv.Atoi(q.Get("deploy"))
+
+	task := newHandlerTask(tasks[0])
 	func() {
 		gRunningMutex.Lock()
 		defer gRunningMutex.Unlock()
 
-		rt, ok := gRunning[task.ID]
-		task.IsRunning = ok
-		if !ok {
-			return
+		if rt, ok := gRunning[task.ID]; ok {
+			task.updateFromRunning(
+				rt, int(lastRun), int(lastTask), int(lastDeploy))
 		}
-
-		task.DurationSeconds = rt.elapsed()
-
-		rt.RunLog.Lock()
-		defer rt.RunLog.Unlock()
-		rt.TaskLog.Lock()
-		defer rt.TaskLog.Unlock()
-		rt.DeployLog.Lock()
-		defer rt.DeployLog.Unlock()
-
-		task.RunLog = rt.RunLog.Serialize(0)
-		task.TaskLog = rt.TaskLog.Serialize(0)
-		task.DeployLog = rt.DeployLog.Serialize(0)
 	}()
 
-	if err := templateTask.Execute(w, &task); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if q.Has("json") {
+		w.Header().Set("Content-Type", "application/json")
+		err = json.NewEncoder(w).Encode(&task)
+	} else {
+		err = templateTask.Execute(w, &task)
+	}
+	if err != nil {
+		log.Println(err)
 	}
 }
 
