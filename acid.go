@@ -244,7 +244,7 @@ var templateTasks = template.Must(template.New("tasks").Parse(`
 `))
 
 func handleTasks(w http.ResponseWriter, r *http.Request) {
-	tasks, err := getTasks(r.Context(), `ORDER BY id DESC`)
+	tasks, err := getTasks(r.Context(), `ORDER BY changed DESC, id DESC`)
 	if err != nil {
 		http.Error(w,
 			"Error retrieving tasks: "+err.Error(),
