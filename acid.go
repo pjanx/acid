@@ -154,6 +154,14 @@ var shellFuncs = ttemplate.FuncMap{
 
 // --- Utilities ---------------------------------------------------------------
 
+func localShell() string {
+	if shell := os.Getenv("SHELL"); shell != "" {
+		return shell
+	}
+	// The os/user package doesn't store the parsed out shell field.
+	return "/bin/sh"
+}
+
 func giteaSign(b []byte) string {
 	payloadHmac := hmac.New(sha256.New, []byte(getConfig().Secret))
 	payloadHmac.Write(b)
@@ -842,7 +850,7 @@ func notifierRunCommand(ctx context.Context, task Task) {
 		return
 	}
 
-	cmd := exec.CommandContext(ctx, "sh")
+	cmd := exec.CommandContext(ctx, localShell())
 	cmd.Stdin = script
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -1166,14 +1174,6 @@ func executorDownload(client *ssh.Client, remoteRoot, localRoot string) error {
 	return nil
 }
 
-func executorLocalShell() string {
-	if shell := os.Getenv("SHELL"); shell != "" {
-		return shell
-	}
-	// The os/user package doesn't store the parsed out shell field.
-	return "/bin/sh"
-}
-
 func executorTmpDir(fallback string) string {
 	// See also: https://systemd.io/TEMPORARY_DIRECTORIES/
 	if tmp := os.Getenv("TMPDIR"); tmp != "" {
@@ -1209,9 +1209,10 @@ func executorDeploy(
 		return err
 	}
 
-	cmd := exec.CommandContext(ctx, executorLocalShell(), "-c", script.String())
+	cmd := exec.CommandContext(ctx, localShell())
 	cmd.Env = rt.localEnv()
 	cmd.Dir = dir
+	cmd.Stdin = script
 	cmd.Stdout = &rt.DeployLog
 	cmd.Stderr = &rt.DeployLog
 	return cmd.Run()
