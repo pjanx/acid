@@ -314,9 +314,7 @@ function get(id) {
 	return document.getElementById(id)
 }
 function getLog(id) {
-	const header = document.getElementById(id)
-	const log = document.getElementById(id + 'log')
-	const text = log.textContent
+	const header = get(id), log = get(id + 'log'), text = log.textContent
 	// lines[-1] is an implementation detail of terminalWriter.Serialize,
 	// lines[-2] is the actual last line.
 	const last = Math.max(0, text.split('\n').length - 2)
@@ -334,8 +332,7 @@ function refreshLog(log, top, changed) {
 	log.log.hidden = empty
 }
 let refresher = setInterval(() => {
-	let run = getLog('run'), task = getLog('task'), deploy = getLog('deploy')
-
+	const run = getLog('run'), task = getLog('task'), deploy = getLog('deploy')
     const url = new URL(window.location.href)
 	url.search = ''
 	url.searchParams.set('json', '')
@@ -374,8 +371,8 @@ let refresher = setInterval(() => {
 		if (!data.IsRunning)
 			clearInterval(refresher)
 	}).catch(error => {
-		alert(error)
 		clearInterval(refresher)
+		alert(error)
 	})
 }, 1000 /* For faster updates than this, we should use WebSockets. */)
 </script>
