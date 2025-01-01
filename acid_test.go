@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 	ttemplate "text/template"
+	"time"
 )
 
 func TestTemplateQuote(t *testing.T) {
@@ -27,6 +28,22 @@ func TestTemplateQuote(t *testing.T) {
 		if b.String() != test.output {
 			t.Errorf("%q should be quoted os %q, not %q\n",
 				test.input, test.output, b.String())
+		}
+	}
+}
+
+func TestShortDurationString(t *testing.T) {
+	for _, test := range []struct {
+		d      time.Duration
+		expect string
+	}{
+		{72 * time.Hour, "3d"},
+		{-3 * time.Hour, "-3h"},
+		{12 * time.Minute, "12m"},
+		{time.Millisecond, "0s"},
+	} {
+		if sd := shortDurationString(test.d); sd != test.expect {
+			t.Errorf("%s = %s; want %s\n", test.d, sd, test.expect)
 		}
 	}
 }

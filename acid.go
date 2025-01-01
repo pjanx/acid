@@ -30,7 +30,6 @@ import (
 	"syscall"
 	ttemplate "text/template"
 	"time"
-	"unicode"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/pkg/sftp"
@@ -1603,18 +1602,15 @@ func (t *Task) CloneURL() string {
 }
 
 func shortDurationString(d time.Duration) string {
-	rs := []rune(d.Truncate(time.Second).String())
-	for i, r := range rs {
-		if !unicode.IsLetter(r) {
-			continue
-		}
-		i++
-		for i < len(rs) && unicode.IsLetter(rs[i]) {
-			i++
-		}
-		return string(rs[:i])
+	if d.Abs() >= 24*time.Hour {
+		return strconv.FormatInt(int64(d/time.Hour/24), 10) + "d"
+	} else if d.Abs() >= time.Hour {
+		return strconv.FormatInt(int64(d/time.Hour), 10) + "h"
+	} else if d.Abs() >= time.Minute {
+		return strconv.FormatInt(int64(d/time.Minute), 10) + "m"
+	} else {
+		return strconv.FormatInt(int64(d/time.Second), 10) + "s"
 	}
-	return string(rs)
 }
 
 func (t *Task) Created() *time.Time {
