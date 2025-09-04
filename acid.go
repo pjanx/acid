@@ -1751,6 +1751,7 @@ func dbOpen(path string) error {
 			`task`, `duration`, `INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return err
 		}
+		fallthrough
 	case 2:
 		// The next migration goes here, remember to increment the number below.
 	}
