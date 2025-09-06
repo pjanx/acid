@@ -1754,6 +1754,8 @@ func dbOpen(path string) error {
 		fallthrough
 	case 2:
 		// The next migration goes here, remember to increment the number below.
+	default:
+		return fmt.Errorf("unsupported database version: %d", version)
 	}
 
 	if _, err = tx.Exec(
