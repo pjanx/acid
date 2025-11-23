@@ -210,11 +210,13 @@ func (tw *terminalWriter) processParsedCSI(
 		if len(params) == 0 {
 			tw.line = tw.lineTop
 			tw.column = 0
-		} else if len(params) >= 2 && params[0] != 0 && params[1] != 0 {
+		} else if len(params) < 2 || params[0] <= 0 || params[1] <= 0 {
+			return false
+		} else if params[0] >= 32766 && params[1] >= 32766 {
+			// Ignore attempts to scan terminal bounds.
+		} else {
 			tw.line = tw.lineTop + params[0] - 1
 			tw.column = params[1] - 1
-		} else {
-			return false
 		}
 		return true
 	case final == 'J': // Erase in Display
