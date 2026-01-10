@@ -507,6 +507,28 @@ type GiteaPushEvent struct {
 	} `json:"repository"`
 }
 
+func getPendingRunnersFor(ctx context.Context, tx *sql.Tx,
+	owner, repo, hash string) (map[string]struct{}, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT runner FROM task
+		WHERE owner = ? AND repo = ? AND hash = ? AND state = ?`,
+		owner, repo, hash, taskStateNew)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	runners := make(map[string]struct{})
+	for rows.Next() {
+		var r string
+		err := rows.Scan(&r)
+		if err != nil {
+			return nil, err
+		}
+		runners[r] = struct{}{}
+	}
+	return runners, rows.Err()
+}
+
 func createTasks(ctx context.Context,
 	owner, repo, hash string, runners []string) error {
 	tx, err := gDB.BeginTx(ctx, nil)
@@ -514,6 +536,16 @@ func createTasks(ctx context.Context,
 		return err
 	}
 	defer tx.Rollback()
+
+	// When you push a tag for a commit that has already had its task run,
+	// running it anew may make it receive a new "git describe" value.
+	//
+	// But if the task hasn't managed to run yet and is currently
+	// still enqueued, duplicating it provides nothing.
+	pending, err := getPendingRunnersFor(ctx, tx, owner, repo, hash)
+	if err != nil {
+		return err
+	}
 
 	stmt, err := tx.Prepare(
 		`INSERT INTO task(owner, repo, hash, runner, created, changed)
@@ -523,6 +555,9 @@ func createTasks(ctx context.Context,
 	}
 
 	for _, runner := range runners {
+		if _, ok := pending[runner]; ok {
+			continue
+		}
 		if _, err := stmt.Exec(owner, repo, hash, runner); err != nil {
 			return err
 		}
