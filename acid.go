@@ -963,6 +963,13 @@ func notifierNotify(ctx context.Context, task Task) error {
 		return err
 	}
 
+	var commitStatus any
+	if resp.StatusCode != http.StatusCreated {
+		return errors.New(resp.Status)
+	} else if err := json.Unmarshal(body, &commitStatus); err != nil {
+		return err
+	}
+
 	_, err = gDB.ExecContext(ctx, `UPDATE task SET notified = 1
 		WHERE id = ? AND state = ? AND detail = ? AND notified = 0`,
 		task.ID, task.State, task.Detail)
