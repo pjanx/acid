@@ -330,6 +330,17 @@ function refreshLog(log, top, changed) {
 	log.header.hidden = empty
 	log.log.hidden = empty
 }
+function refreshTitle(state) {
+	let title = "Task {{.ID}}"
+	switch (state) {
+	case 'Running': title += " 🟡"; break
+	case 'Error':   title += " 🔴"; break
+	case 'Failed':  title += " 🔴"; break
+	case 'Success': title += " 🟢"; break
+	}
+	document.title = title
+}
+refreshTitle('Running')
 let refresher = setInterval(() => {
 	const run = getLog('run'), task = getLog('task'), deploy = getLog('deploy')
     const url = new URL(window.location.href)
@@ -360,6 +371,7 @@ let refresher = setInterval(() => {
 		if (data.Duration)
 			get('duration').textContent = data.Duration
 
+		refreshTitle(data.State)
 		refreshLog(run, data.RunLogTop, data.RunLog)
 		refreshLog(task, data.TaskLogTop, data.TaskLog)
 		refreshLog(deploy, data.DeployLogTop, data.DeployLog)
