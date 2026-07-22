@@ -1549,6 +1549,7 @@ func executorRun(ctx context.Context) error {
 
 	for _, task := range tasks {
 		if err := executorRunTask(ctx, task); err != nil {
+			// Infrastructure failures intentionally stall progress.
 			return fmt.Errorf("task %d for %s: %w",
 				task.ID, task.FullName(), err)
 		}
@@ -1884,10 +1885,6 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
-	if flag.NArg() < 1 {
-		flag.Usage()
-		os.Exit(2)
-	}
 
 	if *version {
 		fmt.Printf("%s %s\n", projectName, projectVersion)
@@ -1898,6 +1895,10 @@ func main() {
 			filterTTY(path)
 		}
 		return
+	}
+	if flag.NArg() < 1 {
+		flag.Usage()
+		os.Exit(2)
 	}
 
 	gConfigPath = flag.Arg(0)

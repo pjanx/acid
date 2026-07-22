@@ -26,6 +26,8 @@ on the */push* endpoint, and/or using the RPC commands.
 
 Options
 -------
+*-tty* [_FILE_ | -]...::
+	Run the internal virtual terminal filter on arbitrary input.
 *-version*::
 	Output version information and exit.
 
