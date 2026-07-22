@@ -316,7 +316,9 @@ func (tw *terminalWriter) processEscape(rb []rune) ([]rune, bool) {
 		tw.processFlush()
 		return rb[2:], true
 	case r == 'M':
-		tw.line--
+		if tw.line > tw.lineTop {
+			tw.line--
+		}
 		return rb[2:], true
 
 	case (r >= 0x30 && r <= 0x4F) || (r >= 0x51 && r <= 0x57) ||
