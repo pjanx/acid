@@ -180,17 +180,7 @@ func giteaNewRequest(ctx context.Context, method, path string, body io.Reader) (
 	return req, err
 }
 
-func getTasks(ctx context.Context, query string, args ...any) ([]Task, error) {
-	rows, err := gDB.QueryContext(ctx, `
-		SELECT id, owner, repo, hash, runner,
-			created, changed, duration,
-			state, detail, notified,
-			runlog, tasklog, deploylog FROM task `+query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
+func getTasksFromRows(rows *sql.Rows) ([]Task, error) {
 	tasks := []Task{}
 	for rows.Next() {
 		var t Task
@@ -205,6 +195,35 @@ func getTasks(ctx context.Context, query string, args ...any) ([]Task, error) {
 		tasks = append(tasks, t)
 	}
 	return tasks, rows.Err()
+}
+
+func getTasksFull(ctx context.Context,
+	query string, args ...any) ([]Task, error) {
+	rows, err := gDB.QueryContext(ctx, `
+		SELECT id, owner, repo, hash, runner,
+			created, changed, duration,
+			state, detail, notified,
+			runlog, tasklog, deploylog FROM task `+query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return getTasksFromRows(rows)
+}
+
+// getTasks returns a list of matching tasks but without logs.
+// Be careful not to call update unless you want logs cleared in the database.
+func getTasks(ctx context.Context, query string, args ...any) ([]Task, error) {
+	rows, err := gDB.QueryContext(ctx, `
+		SELECT id, owner, repo, hash, runner,
+			created, changed, duration,
+			state, detail, notified,
+			x'', x'', x'' FROM task `+query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return getTasksFromRows(rows)
 }
 
 // --- Task views --------------------------------------------------------------
@@ -465,7 +484,7 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := getTasks(r.Context(), `WHERE id = ?`, id)
+	tasks, err := getTasksFull(r.Context(), `WHERE id = ?`, id)
 	if err != nil {
 		http.Error(w,
 			"Error retrieving task: "+err.Error(),
@@ -991,7 +1010,7 @@ func notifierNotify(ctx context.Context, task Task) error {
 }
 
 func notifierRun(ctx context.Context) error {
-	tasks, err := getTasks(ctx, `WHERE notified = 0 ORDER BY id ASC`)
+	tasks, err := getTasksFull(ctx, `WHERE notified = 0 ORDER BY id ASC`)
 	if err != nil {
 		return err
 	}
