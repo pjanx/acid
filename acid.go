@@ -112,16 +112,18 @@ type ConfigProjectRunner struct {
 // Beware that changes do not get applied globally at the same moment.
 func loadConfig() error {
 	new := &Config{}
-	if f, err := os.Open(gConfigPath); err != nil {
+	f, err := os.Open(gConfigPath)
+	if err != nil {
 		return err
-	} else if err = yaml.NewDecoder(f).Decode(new); err != nil {
+	}
+	defer f.Close()
+	if err = yaml.NewDecoder(f).Decode(new); err != nil {
 		return err
 	}
 	if old := getConfig(); old != nil && old.DB != new.DB {
 		return fmt.Errorf("the database file cannot be changed in runtime")
 	}
 
-	var err error
 	new.notifyTemplate, err =
 		ttemplate.New("notify").Funcs(shellFuncs).Parse(new.Notify)
 	if err != nil {
